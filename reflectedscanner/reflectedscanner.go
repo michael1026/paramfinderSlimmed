@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/michael1026/paramfinder/types/scan"
-	"github.com/michael1026/paramfinder/util"
+	"github.com/michael1026/paramfinderSlimmed/types/scan"
+	"github.com/michael1026/paramfinderSlimmed/util"
 )
 
 func PrepareScan(canary string, doc *goquery.Document, reflectedScan *scan.ReflectedScan) {

@@ -1,4 +1,4 @@
-module github.com/michael1026/paramfinder
+module github.com/michael1026/paramfinderSlimmed
 
 go 1.14
 

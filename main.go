@@ -13,10 +13,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/michael1026/paramfinder/reflectedscanner"
-	"github.com/michael1026/paramfinder/scanhttp"
-	"github.com/michael1026/paramfinder/types/scan"
-	"github.com/michael1026/paramfinder/util"
+	"github.com/michael1026/paramfinderSlimmed/reflectedscanner"
+	"github.com/michael1026/paramfinderSlimmed/scanhttp"
+	"github.com/michael1026/paramfinderSlimmed/types/scan"
+	"github.com/michael1026/paramfinderSlimmed/util"
 
 	"github.com/PuerkitoBio/goquery"
 )

@@ -296,7 +296,7 @@ func calculateMaxParameters(scanInfo *scan.URLInfo, client *http.Client, rawUrl 
 		return
 	}
 
-	resp, err := http.Head(rawUrl)
+	resp, err := client.Head(rawUrl)
 	if err != nil {
 		fmt.Printf("Error executing request: %s\n", err)
 		return
@@ -317,7 +317,7 @@ func calculateMaxParameters(scanInfo *scan.URLInfo, client *http.Client, rawUrl 
 
 		parsedUrl.RawQuery = query.Encode()
 
-		resp, err = http.Head(parsedUrl.String())
+		resp, err = client.Head(parsedUrl.String())
 
 		if err != nil || resp.StatusCode != http.StatusOK {
 			scanInfo.MaxParams = maxParameters

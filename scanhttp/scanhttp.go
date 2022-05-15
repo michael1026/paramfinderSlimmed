@@ -3,6 +3,7 @@ package scanhttp
 import (
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -50,7 +51,8 @@ func BuildHttpClient() (c *http.Client) {
 	fastdialerOpts.EnableFallback = true
 	dialer, err := fastdialer.NewDialer(fastdialerOpts)
 	if err != nil {
-		return
+		log.Fatal("Error building HTTP client")
+		return nil
 	}
 
 	transport := &http.Transport{

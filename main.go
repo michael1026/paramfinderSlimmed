@@ -115,6 +115,7 @@ func findParameters(urls chan string, client *http.Client, scanInfo *scan.Scan, 
 		urlInfo := scanInfo.ScanResults[rawUrl]
 		urlInfo.ReflectedScan = &scan.ReflectedScan{}
 
+		// check stability of URL
 		for i := 0; i < 5; i++ {
 			originalTestUrl, err := url.Parse(rawUrl)
 
@@ -128,15 +129,24 @@ func findParameters(urls chan string, client *http.Client, scanInfo *scan.Scan, 
 
 			doc, err := scanhttp.GetDocFromURL(originalTestUrl.String(), client)
 
-			if err == nil && doc != nil {
-				if i == 0 {
-					reflectedscanner.PrepareScan(canary, doc, urlInfo.ReflectedScan)
-					urlInfo.PotentialParameters = findPotentialParameters(doc, &scanInfo.WordList)
-				} else if urlInfo.ReflectedScan.Stable {
-					reflectedscanner.CheckStability(&canary, doc, urlInfo.ReflectedScan)
-				}
+			if err != nil || doc == nil {
+				urlInfo.ReflectedScan.Stable = false
+				continue
+			}
+
+			if i == 0 {
+				reflectedscanner.PrepareScan(canary, doc, urlInfo.ReflectedScan)
+				urlInfo.PotentialParameters = findPotentialParameters(doc, &scanInfo.WordList)
+			} else if urlInfo.ReflectedScan.Stable {
+				reflectedscanner.CheckStability(&canary, doc, urlInfo.ReflectedScan)
 			}
 		}
+
+		// URL isn't stable, skip it
+		if !urlInfo.ReflectedScan.Stable {
+			continue
+		}
+
 		calculateMaxParameters(scanInfo.ScanResults[rawUrl], client, rawUrl)
 
 		queryStrings :=

@@ -17,16 +17,12 @@ func GetDocFromURL(rawUrl string, client *http.Client) (*goquery.Document, error
 		fmt.Printf("Error creating request: %s\n", err)
 		return nil, err
 	}
+	req.Close = true
 	req.Header.Set("Connection", "close")
-
-	// for _, h := range *headers {
-	// 	parts := strings.SplitN(h, ":", 2)
-	// 	if len(parts) != 2 {
-	// 		continue
-	// 	}
-
-	// 	req.Header.Set(parts[0], parts[1])
-	// }
+	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/81.0")
+	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Add("Accept-Encoding", "gzip, deflate")
+	req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
 
 	resp, err := client.Do(req)
 	if err != nil {

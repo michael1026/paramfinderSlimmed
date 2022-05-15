@@ -319,7 +319,13 @@ func calculateMaxParameters(scanInfo *scan.URLInfo, client *http.Client, rawUrl 
 
 		resp, err = client.Head(parsedUrl.String())
 
-		if err != nil || resp.StatusCode != http.StatusOK {
+		if err != nil {
+			return
+		}
+
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
 			scanInfo.MaxParams = maxParameters
 			return
 		}

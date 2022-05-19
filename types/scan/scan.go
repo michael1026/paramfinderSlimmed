@@ -1,15 +1,13 @@
 package scan
 
-type ReflectedScan struct {
-	Stable          bool
-	CanaryCount     int
-	FoundParameters []string
-}
-
 type URLInfo struct {
-	ReflectedScan       *ReflectedScan
+	Stable              bool
+	CanaryCount         int
+	FoundParameters     []string
 	PotentialParameters map[string]string
 	MaxParams           int
+	CanaryValue         string
+	NumberOfCheckedURLs int
 }
 
 type ScanResults map[string]*URLInfo
@@ -18,7 +16,6 @@ type Scan struct {
 	ScanResults ScanResults
 	WordList    []string
 	JsonResults JsonResults
-	CanaryValue string
 }
 
 type JsonResult struct {

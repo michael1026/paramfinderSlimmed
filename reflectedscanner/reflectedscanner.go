@@ -9,22 +9,16 @@ import (
 	"github.com/michael1026/paramfinderSlimmed/util"
 )
 
-func PrepareScan(canary string, doc *goquery.Document, reflectedScan *scan.ReflectedScan) {
-	canaryCount := countReflections(doc, canary)
-	reflectedScan.CanaryCount = canaryCount
-	reflectedScan.Stable = true
-}
+func CheckStability(canary *string, doc *goquery.Document, urlInfo *scan.URLInfo) {
+	canaryCount := CountReflections(doc, *canary)
 
-func CheckStability(canary *string, doc *goquery.Document, reflectedScan *scan.ReflectedScan) {
-	canaryCount := countReflections(doc, *canary)
-
-	if reflectedScan.CanaryCount != canaryCount {
-		reflectedScan.Stable = false
+	if urlInfo.CanaryCount != canaryCount {
+		urlInfo.Stable = false
 	}
 }
 
-func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo, scanInfo *scan.Scan, paramValues map[string]string, baseUrl string) bool {
-	if countReflections(doc, scanInfo.CanaryValue) != urlInfo.ReflectedScan.CanaryCount {
+func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo) bool {
+	if CountReflections(doc, urlInfo.CanaryValue) != urlInfo.CanaryCount {
 		// something happened with the response to cause the canary count to not be correct
 		// this is probably caused by a parameter included in the request
 		// for now, we are going to ignore this URL, but in the future, I'd like to find the parameter that caused this
@@ -33,10 +27,11 @@ func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo, scanIn
 	}
 
 	var foundParameters []string
-	for param, value := range paramValues {
-		counted := countReflections(doc, value)
+	for param, value := range urlInfo.PotentialParameters {
+		counted := CountReflections(doc, value)
 
-		if counted > urlInfo.ReflectedScan.CanaryCount {
+		if counted > urlInfo.CanaryCount {
+			fmt.Printf("counted %d, actual %d\n", counted, urlInfo.CanaryCount)
 			foundParameters = util.AppendIfMissing(foundParameters, param)
 		}
 	}
@@ -49,13 +44,13 @@ func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo, scanIn
 	//
 	// Another solution might be to detect the page being much different, then find what caused that.
 	if len(foundParameters) != urlInfo.MaxParams {
-		urlInfo.ReflectedScan.FoundParameters = append(urlInfo.ReflectedScan.FoundParameters, foundParameters...)
+		urlInfo.FoundParameters = append(urlInfo.FoundParameters, foundParameters...)
 	}
 
 	return false
 }
 
-func countReflections(doc *goquery.Document, canary string) int {
+func CountReflections(doc *goquery.Document, canary string) int {
 	html, err := doc.Html()
 
 	if err != nil {

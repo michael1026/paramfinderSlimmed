@@ -4,14 +4,12 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/michael1026/paramfinderSlimmed/reflectedscanner"
 	"github.com/michael1026/paramfinderSlimmed/scanhttp"
@@ -20,6 +18,20 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 )
+
+type Request struct {
+	*http.Request
+	url string
+}
+
+type Response struct {
+	*http.Response
+	url string
+}
+
+var results map[string]scan.URLInfo
+var wordlist []string
+var client *http.Client
 
 /***************************************
 * Ideas....
@@ -32,13 +44,13 @@ import (
 /***************************************/
 
 func main() {
-	var wordlist []string
 	scanInfo := scan.Scan{}
 	scanInfo.FillDefaults()
+	results = make(map[string]scan.URLInfo)
 
-	outputFile := flag.String("o", "", "File to output results to (.json)")
+	// outputFile := flag.String("o", "", "File to output results to (.json)")
 	wordlistFile := flag.String("w", "", "Wordlist file")
-	threads := flag.Int("t", 5, "Number of threads")
+	// threads := flag.Int("t", 5, "Number of threads")
 
 	flag.Parse()
 
@@ -47,7 +59,6 @@ func main() {
 		scanInfo.WordList = wordlist
 	}
 
-	urls := make(chan string)
 	var lines []string
 
 	s := bufio.NewScanner(os.Stdin)
@@ -57,28 +68,253 @@ func main() {
 		lines = append(lines, s.Text())
 	}
 
-	client := scanhttp.BuildHttpClient()
-	wg_domains := &sync.WaitGroup{}
+	client = scanhttp.BuildHttpClient()
+	// wg := &sync.WaitGroup{}
+	stabilityChannel := make(chan Request, len(lines))
+	stableChannel := make(chan string)
+	stabilityRespChannel := make(chan Response)
+	sizeCheckReqChannel := make(chan Request)
+	readyToScanChannel := make(chan string)
+	parameterURLChannel := make(chan Request)
+	parameterRespChannel := make(chan Response)
 
-	for i := 0; i < *threads; i++ {
-		wg_domains.Add(1)
-		go findParameters(urls, client, &scanInfo, wg_domains)
+	// create requests
+	go addURLsToStabilityRequestChannel(lines, stabilityChannel)
+	// send requests and get responses (possible issue. Not all responses are needed to determine stability)
+	go getStabilityResponses(stabilityChannel, stabilityRespChannel)
+	// check the stability responses to determine stability
+	go checkURLStability(stabilityRespChannel, stableChannel)
+	// add stable URLs to channel for determining max URL size
+	go createMaxURLSizeRequests(stableChannel, sizeCheckReqChannel)
+	// check for max URL size
+	go checkMaxURLSize(sizeCheckReqChannel, readyToScanChannel)
+	// create URLs to find parameters
+	go createParameterURLs(readyToScanChannel, parameterURLChannel)
+	// send requests to get responses
+	go getParameterResponses(parameterURLChannel, parameterRespChannel)
+	// check responses for reflections
+	findReflections(parameterRespChannel)
+
+	// resultJson, err := util.JSONMarshal(scanInfo.JsonResults)
+
+	// if err != nil {
+	// 	log.Fatalf("Error marsheling json: %s\n", err)
+	// }
+
+	// err = ioutil.WriteFile(*outputFile, resultJson, 0644)
+}
+
+func findReflections(parameterResponses chan Response) {
+	for resp := range parameterResponses {
+		if entry, ok := results[resp.url]; ok {
+			doc, err := goquery.NewDocumentFromResponse(resp.Response)
+
+			if err != nil {
+				continue
+			}
+
+			reflectedscanner.CheckDocForReflections(doc, &entry)
+
+			if len(entry.FoundParameters) > 0 {
+				for _, foundParam := range entry.FoundParameters {
+					fmt.Println(foundParam)
+				}
+			}
+		}
 	}
+}
 
-	for _, rawUrl := range lines {
-		urls <- rawUrl
+func getParameterResponses(parameterURLs chan Request, parameterResponses chan Response) {
+	defer close(parameterResponses)
+
+	for req := range parameterURLs {
+		resp, err := client.Do(req.Request)
+		// fmt.Println("requesting1 " + req.url)
+
+		if err != nil {
+			continue
+		}
+
+		parameterResponses <- Response{
+			Response: resp,
+			url:      req.url,
+		}
 	}
+}
 
-	close(urls)
-	wg_domains.Wait()
+func createParameterURLs(readyToScanChannel chan string, parameterURLChannel chan Request) {
+	defer close(parameterURLChannel)
 
-	resultJson, err := util.JSONMarshal(scanInfo.JsonResults)
+	for rawUrl := range readyToScanChannel {
+		if entry, ok := results[rawUrl]; ok {
+			queryStrings :=
+				splitParametersIntoMaxSize(
+					rawUrl,
+					&entry.PotentialParameters,
+					entry.MaxParams,
+					entry.CanaryValue)
 
+			for _, paramValues := range queryStrings {
+				fmt.Println("making request")
+
+				parsedUrl, err := url.Parse(rawUrl)
+
+				if err != nil {
+					continue
+				}
+
+				query := parsedUrl.Query()
+
+				for param, value := range paramValues {
+					query.Add(param, value)
+				}
+
+				parsedUrl.RawQuery = query.Encode()
+
+				parameterURLChannel <- Request{
+					url:     rawUrl,
+					Request: createRequest(parsedUrl.String()),
+				}
+			}
+		}
+	}
+}
+
+func checkURLStability(stabilityRespChannel chan Response, stableChannel chan string) {
+	defer close(stableChannel)
+
+	for resp := range stabilityRespChannel {
+		doc, err := goquery.NewDocumentFromResponse(resp.Response)
+
+		if entry, ok := results[resp.url]; ok {
+
+			if entry.CanaryCount == 0 {
+				entry.PotentialParameters = findPotentialParameters(doc)
+				entry.CanaryCount = reflectedscanner.CountReflections(doc, entry.CanaryValue)
+				fmt.Printf("potential params %d\n", len(entry.PotentialParameters))
+			}
+
+			entry.NumberOfCheckedURLs++
+
+			if entry.Stable == false {
+				fmt.Println("url is unstable. Skipping.3")
+				continue
+			}
+
+			if err != nil {
+				fmt.Println("url is unstable. Skipping.4")
+				entry.Stable = false
+				continue
+			}
+
+			if entry.CanaryCount != reflectedscanner.CountReflections(doc, entry.CanaryValue) {
+				fmt.Println("url is unstable. Skipping.")
+				fmt.Printf("counted %d, actual %d\n", reflectedscanner.CountReflections(doc, entry.CanaryValue), entry.CanaryCount)
+				entry.Stable = false
+				continue
+			}
+
+			if entry.NumberOfCheckedURLs == 5 {
+				stableChannel <- resp.url
+			}
+
+			results[resp.url] = entry
+		}
+	}
+}
+
+func checkMaxURLSize(sizeCheckReqChannel chan Request, readyToScanURLs chan string) {
+	defer close(readyToScanURLs)
+
+	for req := range sizeCheckReqChannel {
+		if entry, ok := results[req.url]; ok {
+			fmt.Println(req.Request.URL.String())
+			currentMaxParams := len(req.Request.URL.Query()) - 50
+
+			if entry.MaxParams != 100 {
+				// already solved, move on.
+				continue
+			}
+
+			resp, err := client.Do(req.Request)
+			// fmt.Println("requesting3 " + req.url)
+
+			if err != nil || resp.StatusCode != http.StatusOK {
+				entry.MaxParams = currentMaxParams
+				readyToScanURLs <- req.url
+				results[req.url] = entry
+				fmt.Printf("max isa %d\n", entry.MaxParams)
+				continue
+			}
+
+			results[req.url] = entry
+		}
+	}
+}
+
+func createMaxURLSizeRequests(stableReqChannel chan string, sizeCheckReqChannel chan Request) {
+	defer close(sizeCheckReqChannel)
+
+	for rawUrl := range stableReqChannel {
+		if entry, ok := results[rawUrl]; ok {
+			parsedUrl, err := url.Parse(rawUrl)
+
+			if err != nil {
+				fmt.Printf("Error parsing URL: %s\n", err)
+				continue
+			}
+
+			// fmt.Println("requesting2 " + rawUrl)
+
+			if err != nil {
+				fmt.Printf("Error creating request")
+				continue
+			}
+
+			query := parsedUrl.Query()
+			// add canary back so we can check reflections later
+			query.Add(util.RandSeq(6), entry.CanaryValue)
+
+			// add 100 parameters to URL as a start
+			for i := 0; i < 100; i++ {
+				query.Set(util.RandSeq(7), util.RandSeq(7))
+			}
+
+			// add an additional 50 (15 times)
+			for i := 0; i < 15; i++ {
+				for i := 0; i < 50; i++ {
+					query.Set(util.RandSeq(10), util.RandSeq(10))
+				}
+
+				parsedUrl.RawQuery = query.Encode()
+				req, err := http.NewRequest("HEAD", parsedUrl.String(), nil)
+
+				if err != nil {
+					continue
+				}
+
+				sizeCheckReqChannel <- Request{
+					url:     rawUrl,
+					Request: req,
+				}
+			}
+			fmt.Println("done adding max param urls")
+		}
+	}
+}
+
+func createRequest(url string) *http.Request {
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		log.Fatalf("Error marsheling json: %s\n", err)
+		return nil
 	}
+	req.Close = true
+	req.Header.Add("Connection", "close")
+	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/81.0")
+	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
 
-	err = ioutil.WriteFile(*outputFile, resultJson, 0644)
+	return req
 }
 
 func readLines(path string) ([]string, error) {
@@ -104,18 +340,18 @@ func readWordlistIntoFile(wordlistPath string) ([]string, error) {
 	return lines, err
 }
 
-func findParameters(urls chan string, client *http.Client, scanInfo *scan.Scan, wg_domains *sync.WaitGroup) {
-	defer wg_domains.Done()
+func addURLsToStabilityRequestChannel(urls []string, reqChan chan Request) {
+	defer close(reqChan)
 
-	canary := util.RandSeq(10)
-	scanInfo.CanaryValue = util.RandSeq(6)
+	for _, rawUrl := range urls {
+		canary := util.RandSeq(6)
+		results[rawUrl] = scan.URLInfo{
+			CanaryValue: canary,
+			CanaryCount: 0,
+			Stable:      true,
+			MaxParams:   100,
+		}
 
-	for rawUrl := range urls {
-		fmt.Printf("Currently scanning: %s\n", rawUrl)
-		urlInfo := scanInfo.ScanResults[rawUrl]
-		urlInfo.ReflectedScan = &scan.ReflectedScan{}
-
-		// check stability of URL
 		for i := 0; i < 5; i++ {
 			originalTestUrl, err := url.Parse(rawUrl)
 
@@ -127,78 +363,37 @@ func findParameters(urls chan string, client *http.Client, scanInfo *scan.Scan, 
 			query.Set(util.RandSeq(6), canary)
 			originalTestUrl.RawQuery = query.Encode()
 
-			doc, err := scanhttp.GetDocFromURL(originalTestUrl.String(), client)
+			req := createRequest(originalTestUrl.String())
 
-			if err != nil || doc == nil {
-				urlInfo.ReflectedScan.Stable = false
+			reqChan <- Request{req, rawUrl}
+		}
+	}
+}
+
+func getStabilityResponses(requests chan Request, responses chan Response) {
+	defer close(responses)
+
+	for req := range requests {
+		if entry, ok := results[req.url]; ok {
+			if entry.Stable == false {
+				fmt.Println("url is unstable. Skipping.1")
 				continue
 			}
 
-			if i == 0 {
-				reflectedscanner.PrepareScan(canary, doc, urlInfo.ReflectedScan)
-				urlInfo.PotentialParameters = findPotentialParameters(doc, &scanInfo.WordList)
-			} else if urlInfo.ReflectedScan.Stable {
-				reflectedscanner.CheckStability(&canary, doc, urlInfo.ReflectedScan)
-			}
-		}
-
-		// URL isn't stable, skip it
-		if !urlInfo.ReflectedScan.Stable {
-			continue
-		}
-
-		calculateMaxParameters(scanInfo.ScanResults[rawUrl], client, rawUrl)
-
-		queryStrings :=
-			splitParametersIntoMaxSize(
-				rawUrl,
-				&scanInfo.ScanResults[rawUrl].PotentialParameters,
-				scanInfo.ScanResults[rawUrl].MaxParams,
-				scanInfo.CanaryValue)
-
-		wg_split := &sync.WaitGroup{}
-
-		for paramValuesIndex, paramValues := range queryStrings {
-			if scanInfo.ScanResults[rawUrl].ReflectedScan.Stable == false {
-				fmt.Printf("URL %s is unstable. Skipping\n", rawUrl)
-				continue
-			}
-
-			parsedUrl, err := url.Parse(rawUrl)
+			resp, err := client.Do(req.Request)
+			// fmt.Println("request " + req.url)
 
 			if err != nil {
+				fmt.Println("url is unstable. Skipping.2")
+				entry.Stable = false
+
 				continue
 			}
 
-			query := parsedUrl.Query()
-
-			for param, value := range paramValues {
-				query.Add(param, value)
+			responses <- Response{
+				url:      req.url,
+				Response: resp,
 			}
-
-			parsedUrl.RawQuery = query.Encode()
-
-			wg_split.Add(1)
-
-			go func(paramValuesCopy *map[string]string) {
-				defer wg_split.Done()
-
-				doc, err := scanhttp.GetDocFromURL(parsedUrl.String(), client)
-
-				if err != nil {
-					return
-				}
-
-				if doc != nil {
-					reflectedscanner.CheckDocForReflections(doc, scanInfo.ScanResults[rawUrl], scanInfo, *paramValuesCopy, rawUrl)
-				}
-			}(&queryStrings[paramValuesIndex])
-		}
-
-		wg_split.Wait()
-
-		if len(scanInfo.ScanResults[rawUrl].ReflectedScan.FoundParameters) > 0 {
-			scanInfo.JsonResults[rawUrl] = scan.JsonResult{Params: scanInfo.ScanResults[rawUrl].ReflectedScan.FoundParameters}
 		}
 	}
 }
@@ -237,7 +432,7 @@ func splitParametersIntoMaxSize(rawUrl string, parameters *map[string]string, ma
 *
 ************************************************************************/
 
-func findPotentialParameters(doc *goquery.Document, wordlist *[]string) map[string]string {
+func findPotentialParameters(doc *goquery.Document) map[string]string {
 	parameters := make(map[string]string)
 	doc.Find("input").Each(func(index int, item *goquery.Selection) {
 		name, ok := item.Attr("name")
@@ -247,9 +442,9 @@ func findPotentialParameters(doc *goquery.Document, wordlist *[]string) map[stri
 		}
 	})
 
-	wordlist = keywordsFromRegex(doc, wordlist)
+	finalWordlist := keywordsFromRegex(doc)
 
-	for _, word := range *wordlist {
+	for _, word := range finalWordlist {
 		parameters[word] = util.RandSeq(10)
 	}
 
@@ -262,9 +457,9 @@ func findPotentialParameters(doc *goquery.Document, wordlist *[]string) map[stri
 *
 ************************************************************************/
 
-func keywordsFromRegex(doc *goquery.Document, wordlist *[]string) *[]string {
+func keywordsFromRegex(doc *goquery.Document) []string {
 	html, err := doc.Html()
-	var newWordlist []string = *wordlist
+	var newWordlist []string = wordlist
 
 	if err != nil {
 		fmt.Printf("Error reading doc: %s\n", err)
@@ -283,12 +478,12 @@ func keywordsFromRegex(doc *goquery.Document, wordlist *[]string) *[]string {
 			match = strings.ReplaceAll(match, " ", "")
 
 			if match != "" {
-				newWordlist = util.AppendIfMissing(*wordlist, match)
+				newWordlist = util.AppendIfMissing(wordlist, match)
 			}
 		}
 	}
 
-	return &newWordlist
+	return newWordlist
 }
 
 /***********************************************************************

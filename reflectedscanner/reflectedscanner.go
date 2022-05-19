@@ -31,7 +31,6 @@ func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo) bool {
 		counted := CountReflections(doc, value)
 
 		if counted > urlInfo.CanaryCount {
-			fmt.Printf("counted %d, actual %d\n", counted, urlInfo.CanaryCount)
 			foundParameters = util.AppendIfMissing(foundParameters, param)
 		}
 	}

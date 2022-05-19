@@ -10,6 +10,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/michael1026/paramfinderSlimmed/reflectedscanner"
 	"github.com/michael1026/paramfinderSlimmed/scanhttp"
@@ -77,6 +79,7 @@ func main() {
 	readyToScanChannel := make(chan string)
 	parameterURLChannel := make(chan Request)
 	parameterRespChannel := make(chan Response)
+	wg := sync.WaitGroup{}
 
 	// create requests
 	go addURLsToStabilityRequestChannel(lines, stabilityChannel)
@@ -94,6 +97,8 @@ func main() {
 	go getParameterResponses(parameterURLChannel, parameterRespChannel)
 	// check responses for reflections
 	findReflections(parameterRespChannel)
+
+	wg.Wait()
 
 	// resultJson, err := util.JSONMarshal(scanInfo.JsonResults)
 
@@ -122,24 +127,37 @@ func findReflections(parameterResponses chan Response) {
 			}
 		}
 	}
+
+	time.Sleep(10 * time.Second)
 }
 
 func getParameterResponses(parameterURLs chan Request, parameterResponses chan Response) {
-	defer close(parameterResponses)
+	// defer close(parameterResponses)
+	var wg sync.WaitGroup
 
-	for req := range parameterURLs {
-		resp, err := client.Do(req.Request)
-		// fmt.Println("requesting1 " + req.url)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			for req := range parameterURLs {
+				resp, err := client.Do(req.Request)
+				// fmt.Println("requesting1 " + req.url)
 
-		if err != nil {
-			continue
-		}
+				if err != nil {
+					continue
+				}
 
-		parameterResponses <- Response{
-			Response: resp,
-			url:      req.url,
-		}
+				parameterResponses <- Response{
+					Response: resp,
+					url:      req.url,
+				}
+			}
+
+			wg.Done()
+		}()
 	}
+
+	wg.Wait()
+	close(parameterResponses)
 }
 
 func createParameterURLs(readyToScanChannel chan string, parameterURLChannel chan Request) {
@@ -155,7 +173,6 @@ func createParameterURLs(readyToScanChannel chan string, parameterURLChannel cha
 					entry.CanaryValue)
 
 			for _, paramValues := range queryStrings {
-				fmt.Println("making request")
 
 				parsedUrl, err := url.Parse(rawUrl)
 
@@ -187,30 +204,37 @@ func checkURLStability(stabilityRespChannel chan Response, stableChannel chan st
 		doc, err := goquery.NewDocumentFromResponse(resp.Response)
 
 		if entry, ok := results[resp.url]; ok {
+			if err != nil || doc == nil {
+				entry.Stable = false
+				results[resp.url] = entry
+				continue
+			}
 
 			if entry.CanaryCount == 0 {
 				entry.PotentialParameters = findPotentialParameters(doc)
 				entry.CanaryCount = reflectedscanner.CountReflections(doc, entry.CanaryValue)
-				fmt.Printf("potential params %d\n", len(entry.PotentialParameters))
 			}
 
 			entry.NumberOfCheckedURLs++
 
 			if entry.Stable == false {
 				fmt.Println("url is unstable. Skipping.3")
+				entry.Stable = false
+				results[resp.url] = entry
 				continue
 			}
 
 			if err != nil {
 				fmt.Println("url is unstable. Skipping.4")
 				entry.Stable = false
+				results[resp.url] = entry
 				continue
 			}
 
 			if entry.CanaryCount != reflectedscanner.CountReflections(doc, entry.CanaryValue) {
 				fmt.Println("url is unstable. Skipping.")
-				fmt.Printf("counted %d, actual %d\n", reflectedscanner.CountReflections(doc, entry.CanaryValue), entry.CanaryCount)
 				entry.Stable = false
+				results[resp.url] = entry
 				continue
 			}
 
@@ -228,7 +252,6 @@ func checkMaxURLSize(sizeCheckReqChannel chan Request, readyToScanURLs chan stri
 
 	for req := range sizeCheckReqChannel {
 		if entry, ok := results[req.url]; ok {
-			fmt.Println(req.Request.URL.String())
 			currentMaxParams := len(req.Request.URL.Query()) - 50
 
 			if entry.MaxParams != 100 {
@@ -243,7 +266,6 @@ func checkMaxURLSize(sizeCheckReqChannel chan Request, readyToScanURLs chan stri
 				entry.MaxParams = currentMaxParams
 				readyToScanURLs <- req.url
 				results[req.url] = entry
-				fmt.Printf("max isa %d\n", entry.MaxParams)
 				continue
 			}
 
@@ -298,7 +320,6 @@ func createMaxURLSizeRequests(stableReqChannel chan string, sizeCheckReqChannel 
 					Request: req,
 				}
 			}
-			fmt.Println("done adding max param urls")
 		}
 	}
 }
@@ -371,31 +392,41 @@ func addURLsToStabilityRequestChannel(urls []string, reqChan chan Request) {
 }
 
 func getStabilityResponses(requests chan Request, responses chan Response) {
-	defer close(responses)
+	// defer close(responses)
+	var wg sync.WaitGroup
 
-	for req := range requests {
-		if entry, ok := results[req.url]; ok {
-			if entry.Stable == false {
-				fmt.Println("url is unstable. Skipping.1")
-				continue
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			for req := range requests {
+				if entry, ok := results[req.url]; ok {
+					if entry.Stable == false {
+						fmt.Println("url is unstable. Skipping.1")
+						continue
+					}
+
+					resp, err := client.Do(req.Request)
+					// fmt.Println("request " + req.url)
+
+					if err != nil {
+						fmt.Println("url is unstable. Skipping.2")
+						entry.Stable = false
+
+						continue
+					}
+
+					responses <- Response{
+						url:      req.url,
+						Response: resp,
+					}
+				}
 			}
-
-			resp, err := client.Do(req.Request)
-			// fmt.Println("request " + req.url)
-
-			if err != nil {
-				fmt.Println("url is unstable. Skipping.2")
-				entry.Stable = false
-
-				continue
-			}
-
-			responses <- Response{
-				url:      req.url,
-				Response: resp,
-			}
-		}
+			wg.Done()
+		}()
 	}
+	wg.Wait()
+
+	close(responses)
 }
 
 /************************************************************************

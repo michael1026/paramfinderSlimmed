@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -11,7 +12,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/michael1026/paramfinderSlimmed/reflectedscanner"
 	"github.com/michael1026/paramfinderSlimmed/scanhttp"
@@ -33,6 +33,7 @@ type Response struct {
 
 var results map[string]scan.URLInfo
 var wordlist []string
+var jsonResults map[string]scan.JsonResult
 var client *http.Client
 
 /***************************************
@@ -49,8 +50,9 @@ func main() {
 	scanInfo := scan.Scan{}
 	scanInfo.FillDefaults()
 	results = make(map[string]scan.URLInfo)
+	jsonResults = make(map[string]scan.JsonResult)
 
-	// outputFile := flag.String("o", "", "File to output results to (.json)")
+	outputFile := flag.String("o", "", "File to output results to (.json)")
 	wordlistFile := flag.String("w", "", "Wordlist file")
 	// threads := flag.Int("t", 5, "Number of threads")
 
@@ -100,13 +102,13 @@ func main() {
 
 	wg.Wait()
 
-	// resultJson, err := util.JSONMarshal(scanInfo.JsonResults)
+	resultJson, err := util.JSONMarshal(jsonResults)
 
-	// if err != nil {
-	// 	log.Fatalf("Error marsheling json: %s\n", err)
-	// }
+	if err != nil {
+		log.Fatalf("Error marsheling json: %s\n", err)
+	}
 
-	// err = ioutil.WriteFile(*outputFile, resultJson, 0644)
+	err = ioutil.WriteFile(*outputFile, resultJson, 0644)
 }
 
 func findReflections(parameterResponses chan Response) {
@@ -125,10 +127,12 @@ func findReflections(parameterResponses chan Response) {
 					fmt.Println(foundParam)
 				}
 			}
+
+			if len(entry.FoundParameters) > 0 {
+				jsonResults[resp.url] = scan.JsonResult{Params: entry.FoundParameters}
+			}
 		}
 	}
-
-	time.Sleep(10 * time.Second)
 }
 
 func getParameterResponses(parameterURLs chan Request, parameterResponses chan Response) {

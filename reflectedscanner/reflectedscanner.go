@@ -17,16 +17,17 @@ func CheckStability(canary *string, doc *goquery.Document, urlInfo *scan.URLInfo
 	}
 }
 
-func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo) bool {
+func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo) []string {
+	var foundParameters []string
+
 	if CountReflections(doc, urlInfo.CanaryValue) != urlInfo.CanaryCount {
 		// something happened with the response to cause the canary count to not be correct
 		// this is probably caused by a parameter included in the request
 		// for now, we are going to ignore this URL, but in the future, I'd like to find the parameter that caused this
 
-		return true
+		return foundParameters
 	}
 
-	var foundParameters []string
 	for param, value := range urlInfo.PotentialParameters {
 		counted := CountReflections(doc, value)
 
@@ -42,11 +43,11 @@ func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo) bool {
 	// query.
 	//
 	// Another solution might be to detect the page being much different, then find what caused that.
-	if len(foundParameters) != urlInfo.MaxParams {
-		urlInfo.FoundParameters = append(urlInfo.FoundParameters, foundParameters...)
+	if len(foundParameters) == urlInfo.MaxParams {
+		return []string{}
 	}
 
-	return false
+	return foundParameters
 }
 
 func CountReflections(doc *goquery.Document, canary string) int {

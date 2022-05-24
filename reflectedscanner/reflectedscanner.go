@@ -1,26 +1,24 @@
 package reflectedscanner
 
 import (
-	"fmt"
 	"strings"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/michael1026/paramfinderSlimmed/types/scan"
 	"github.com/michael1026/paramfinderSlimmed/util"
 )
 
-func CheckStability(canary *string, doc *goquery.Document, urlInfo *scan.URLInfo) {
-	canaryCount := CountReflections(doc, *canary)
+func CheckStability(canary *string, body string, urlInfo *scan.URLInfo) {
+	canaryCount := CountReflections(body, *canary)
 
 	if urlInfo.CanaryCount != canaryCount {
 		urlInfo.Stable = false
 	}
 }
 
-func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo) []string {
+func CheckDocForReflections(body string, urlInfo *scan.URLInfo) []string {
 	var foundParameters []string
 
-	if CountReflections(doc, urlInfo.CanaryValue) != urlInfo.CanaryCount {
+	if CountReflections(body, urlInfo.CanaryValue) != urlInfo.CanaryCount {
 		// something happened with the response to cause the canary count to not be correct
 		// this is probably caused by a parameter included in the request
 		// for now, we are going to ignore this URL, but in the future, I'd like to find the parameter that caused this
@@ -29,7 +27,7 @@ func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo) []stri
 	}
 
 	for param, value := range urlInfo.PotentialParameters {
-		counted := CountReflections(doc, value)
+		counted := CountReflections(body, value)
 
 		if counted > urlInfo.CanaryCount {
 			foundParameters = util.AppendIfMissing(foundParameters, param)
@@ -50,12 +48,6 @@ func CheckDocForReflections(doc *goquery.Document, urlInfo *scan.URLInfo) []stri
 	return foundParameters
 }
 
-func CountReflections(doc *goquery.Document, canary string) int {
-	html, err := doc.Html()
-
-	if err != nil {
-		fmt.Printf("Error converting to HTML: %s\n", err)
-	}
-
-	return strings.Count(html, canary)
+func CountReflections(body string, canary string) int {
+	return strings.Count(body, canary)
 }

@@ -27,8 +27,13 @@ type Request struct {
 }
 
 type Response struct {
-	*http.Response
+	doc *goquery.Document
 	url string
+}
+
+type Body struct {
+	body string
+	url  string
 }
 
 type FoundParameters struct {
@@ -84,7 +89,7 @@ func main() {
 	sizeCheckReqChannel := make(chan Request)
 	readyToScanChannel := make(chan string)
 	parameterURLChannel := make(chan Request)
-	parameterRespChannel := make(chan Response)
+	parameterRespChannel := make(chan Body)
 	foundParametersChannel := make(chan FoundParameters)
 	wg := sync.WaitGroup{}
 
@@ -141,7 +146,7 @@ func writeJsonResults(foundParamsChan chan FoundParameters, outputFile string) {
 	}
 }
 
-func findReflections(parameterResponses chan Response, foundParamsChan chan FoundParameters) {
+func findReflections(parameterResponses chan Body, foundParamsChan chan FoundParameters) {
 	var wg sync.WaitGroup
 
 	for i := 0; i < 10; i++ {
@@ -151,13 +156,7 @@ func findReflections(parameterResponses chan Response, foundParamsChan chan Foun
 
 			for resp := range parameterResponses {
 				if entry, ok := loadResults(resp.url); ok {
-					doc, err := goquery.NewDocumentFromResponse(resp.Response)
-
-					if err != nil {
-						continue
-					}
-
-					foundParams := reflectedscanner.CheckDocForReflections(doc, &entry)
+					foundParams := reflectedscanner.CheckDocForReflections(resp.body, &entry)
 
 					if len(foundParams) > 0 {
 						for _, param := range foundParams {
@@ -178,7 +177,7 @@ func findReflections(parameterResponses chan Response, foundParamsChan chan Foun
 	close(foundParamsChan)
 }
 
-func getParameterResponses(parameterURLs chan Request, parameterResponses chan Response) {
+func getParameterResponses(parameterURLs chan Request, parameterResponses chan Body) {
 	var wg sync.WaitGroup
 
 	for i := 0; i < 10; i++ {
@@ -195,11 +194,14 @@ func getParameterResponses(parameterURLs chan Request, parameterResponses chan R
 
 				defer resp.Body.Close()
 
-				parameterResponses <- Response{
-					Response: resp,
-					url:      req.url,
-				}
+				bodyString := util.ResponseToBodyString(resp)
 
+				if resp.StatusCode == http.StatusOK {
+					parameterResponses <- Body{
+						body: bodyString,
+						url:  req.url,
+					}
+				}
 			}
 		}()
 	}
@@ -259,25 +261,8 @@ func checkURLStability(stabilityRespChannel chan Response, stableChannel chan st
 	defer close(stableChannel)
 
 	for resp := range stabilityRespChannel {
-		doc, err := goquery.NewDocumentFromResponse(resp.Response)
-
 		if entry, ok := loadResults(resp.url); ok {
-			if err != nil || doc == nil {
-				entry.Stable = false
-				addToResults(resp.url, entry)
-				continue
-			}
-
-			if entry.NumberOfCheckedURLs == 0 {
-				entry.PotentialParameters = findPotentialParameters(doc)
-				entry.CanaryCount = reflectedscanner.CountReflections(doc, entry.CanaryValue)
-			}
-
-			entry.NumberOfCheckedURLs++
-
-			if entry.Stable == false {
-				continue
-			}
+			body, err := resp.doc.Html()
 
 			if err != nil {
 				fmt.Printf("%s is unstable. Skipping.\n", resp.url)
@@ -286,7 +271,18 @@ func checkURLStability(stabilityRespChannel chan Response, stableChannel chan st
 				continue
 			}
 
-			if entry.CanaryCount != reflectedscanner.CountReflections(doc, entry.CanaryValue) {
+			if entry.NumberOfCheckedURLs == 0 {
+				entry.PotentialParameters = findPotentialParameters(resp.doc)
+				entry.CanaryCount = reflectedscanner.CountReflections(body, entry.CanaryValue)
+			}
+
+			entry.NumberOfCheckedURLs++
+
+			if entry.Stable == false {
+				continue
+			}
+
+			if entry.CanaryCount != reflectedscanner.CountReflections(body, entry.CanaryValue) {
 				fmt.Printf("%s is unstable. Skipping.\n", resp.url)
 				entry.Stable = false
 				addToResults(resp.url, entry)
@@ -467,9 +463,15 @@ func getStabilityResponses(requests chan Request, responses chan Response) {
 						continue
 					}
 
-					responses <- Response{
-						url:      req.url,
-						Response: resp,
+					defer resp.Body.Close()
+
+					doc, err := goquery.NewDocumentFromResponse(resp)
+
+					if err == nil && doc != nil {
+						responses <- Response{
+							url: req.url,
+							doc: doc,
+						}
 					}
 				}
 			}
@@ -491,18 +493,13 @@ func findPotentialParameters(doc *goquery.Document) map[string]string {
 	doc.Find("input").Each(func(index int, item *goquery.Selection) {
 		name, ok := item.Attr("name")
 
-		if ok && len(name) > 0 && len(name) < 20 {
+		if ok && len(name) > 0 && len(name) <= 15 {
 			parameters[name] = util.RandSeq(10)
 		}
 	})
-
 	regexWordlist := keywordsFromRegex(doc)
 
 	for _, word := range regexWordlist {
-		parameters[word] = util.RandSeq(10)
-	}
-
-	for _, word := range wordlist {
 		parameters[word] = util.RandSeq(10)
 	}
 
@@ -523,7 +520,11 @@ func keywordsFromRegex(doc *goquery.Document) []string {
 		fmt.Printf("Error reading doc: %s\n", err)
 	}
 
-	regexs := [...]string{"\"[a-zA-Z_\\-]+\":", "[a-zA-Z_\\-]+:(\\d|{|\"|\\s)"}
+	regexs := [...]string{
+		"\"[a-zA-Z_\\-]{1,20}\":",
+		"'[a-zA-Z_\\-]{1,20}':",
+		"[a-zA-Z_\\-]{1,20}:({|\"|\\s)",
+		"[a-zA-Z_\\-]{1,20} = (\"|')"}
 
 	for _, regex := range regexs {
 		re := regexp.MustCompile(regex)
@@ -537,68 +538,13 @@ func keywordsFromRegex(doc *goquery.Document) []string {
 				match = strings.ReplaceAll(match, " ", "")
 
 				if match != "" {
-					newWordlist = util.AppendIfMissing(wordlist, match)
+					newWordlist = util.AppendIfMissing(newWordlist, match)
 				}
 			}
 		}
 	}
 
 	return newWordlist
-}
-
-/***********************************************************************
-*
-* Calculates the max number of parameters before the page breaks
-*
-************************************************************************/
-
-func calculateMaxParameters(scanInfo *scan.URLInfo, client *http.Client, rawUrl string) {
-	maxParameters := 100
-	parsedUrl, err := url.Parse(rawUrl)
-
-	if err != nil {
-		fmt.Printf("Error parsing URL: %s\n", err)
-		return
-	}
-
-	resp, err := client.Head(rawUrl)
-	if err != nil {
-		fmt.Printf("Error executing request: %s\n", err)
-		return
-	}
-
-	resp.Body.Close()
-
-	query := parsedUrl.Query()
-
-	for i := 0; i < 100; i++ {
-		query.Set(util.RandSeq(7), util.RandSeq(7))
-	}
-
-	for i := 0; i < 15; i++ {
-		for i := 0; i < 100; i++ {
-			query.Set(util.RandSeq(10), util.RandSeq(10))
-		}
-
-		parsedUrl.RawQuery = query.Encode()
-
-		resp, err = client.Head(parsedUrl.String())
-
-		if err != nil {
-			return
-		}
-
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			scanInfo.MaxParams = maxParameters
-			return
-		}
-
-		maxParameters += 50
-	}
-
-	scanInfo.MaxParams = 1500
 }
 
 func addToResults(key string, info scan.URLInfo) {

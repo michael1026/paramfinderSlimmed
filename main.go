@@ -459,7 +459,7 @@ func getStabilityResponses(requests chan Request, responses chan Response) {
 					if err != nil {
 						fmt.Printf("%s is unstable. Skipping.\n", req.url)
 						entry.Stable = false
-
+						addToResults(req.url, entry)
 						continue
 					}
 

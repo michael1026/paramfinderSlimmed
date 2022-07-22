@@ -19,7 +19,12 @@ type Scan struct {
 }
 
 type JsonResult struct {
-	Params []string `json:"params"`
+	Params []Param `json:"params"`
+}
+
+type Param struct {
+	Method string   `json:"method"`
+	Names  []string `json:"names"`
 }
 
 type JsonResults map[string]JsonResult

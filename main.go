@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -64,6 +66,7 @@ func main() {
 
 	outputFile := flag.String("o", "", "File to output results to (.json)")
 	wordlistFile := flag.String("w", "", "Wordlist file")
+	requestMethod := flag.String("X", "GET", "Request method (default GET)")
 	// threads := flag.Int("t", 5, "Number of threads")
 
 	flag.Parse()
@@ -93,40 +96,55 @@ func main() {
 	foundParametersChannel := make(chan FoundParameters)
 	wg := sync.WaitGroup{}
 
-	// create requests
-	go addURLsToStabilityRequestChannel(lines, stabilityChannel)
-	// send requests and get responses (possible issue. Not all responses are needed to determine stability)
-	go getStabilityResponses(stabilityChannel, stabilityRespChannel)
-	// check the stability responses to determine stability
-	go checkURLStability(stabilityRespChannel, stableChannel)
-	// add stable URLs to channel for determining max URL size
-	go createMaxURLSizeRequests(stableChannel, sizeCheckReqChannel)
-	// check for max URL size
-	go checkMaxURLSize(sizeCheckReqChannel, readyToScanChannel)
-	// create URLs to find parameters
-	go createParameterURLs(readyToScanChannel, parameterURLChannel)
+	if *requestMethod != "GET" {
+		// create requests
+		go addMethodURLsToStabilityRequestChannel(lines, stabilityChannel, *requestMethod)
+		// send requests and get responses (possible issue. Not all responses are needed to determine stability)
+		go getStabilityResponses(stabilityChannel, stabilityRespChannel)
+		// check the stability responses to determine stability
+		go checkURLStability(stabilityRespChannel, stableChannel)
+		go createMaxBodySizeRequests(stableChannel, sizeCheckReqChannel, *requestMethod)
+		go checkMaxReqSize(sizeCheckReqChannel, readyToScanChannel)
+		go createParameterReqs(readyToScanChannel, parameterURLChannel, *requestMethod)
+	} else {
+		// create requests
+		go addURLsToStabilityRequestChannel(lines, stabilityChannel)
+		// send requests and get responses (possible issue. Not all responses are needed to determine stability)
+		go getStabilityResponses(stabilityChannel, stabilityRespChannel)
+		// check the stability responses to determine stability
+		go checkURLStability(stabilityRespChannel, stableChannel)
+		// add stable URLs to channel for determining max URL size
+		go createMaxURLSizeRequests(stableChannel, sizeCheckReqChannel)
+		// check for max URL size
+		go checkMaxURLSize(sizeCheckReqChannel, readyToScanChannel)
+		// create URLs to find parameters
+		go createParameterURLs(readyToScanChannel, parameterURLChannel)
+	}
+
 	// send requests to get responses
 	go getParameterResponses(parameterURLChannel, parameterRespChannel)
 	// check responses for reflections
 	go findReflections(parameterRespChannel, foundParametersChannel)
 
-	writeJsonResults(foundParametersChannel, *outputFile)
+	writeJsonResults(foundParametersChannel, *outputFile, *requestMethod)
 
 	wg.Wait()
 
 }
 
-func writeJsonResults(foundParamsChan chan FoundParameters, outputFile string) {
+func writeJsonResults(foundParamsChan chan FoundParameters, outputFile string, method string) {
 	jsonResults := make(map[string]scan.JsonResult)
 
 	for paramResult := range foundParamsChan {
 		if entry, ok := jsonResults[paramResult.url]; ok {
-			entry.Params = append(entry.Params, paramResult.parameters...)
+			param := scan.Param{Method: method, Names: paramResult.parameters}
+			entry.Params = append(entry.Params, param)
 
 			jsonResults[paramResult.url] = entry
 		} else {
+			param := scan.Param{Method: method, Names: paramResult.parameters}
 			result := scan.JsonResult{
-				Params: paramResult.parameters,
+				Params: []scan.Param{param},
 			}
 
 			jsonResults[paramResult.url] = result
@@ -238,7 +256,7 @@ func createParameterURLs(readyToScanChannel chan string, parameterURLChannel cha
 
 					parameterURLChannel <- Request{
 						url:     rawUrl,
-						Request: createRequest(parsedUrl.String()),
+						Request: createRequest(parsedUrl.String(), "GET", nil),
 					}
 
 					paramCount = 0
@@ -251,6 +269,40 @@ func createParameterURLs(readyToScanChannel chan string, parameterURLChannel cha
 					}
 
 					query = parsedUrl.Query()
+				}
+			}
+		}
+	}
+}
+
+func createParameterReqs(readyToScanChannel chan string, parameterURLChannel chan Request, method string) {
+	defer close(parameterURLChannel)
+
+	for rawUrl := range readyToScanChannel {
+		if entry, ok := loadResults(rawUrl); ok {
+			paramCount := 0
+			totalCount := 0
+
+			query := url.Values{}
+
+			for name, value := range entry.PotentialParameters {
+				query.Add(name, value)
+				paramCount++
+				totalCount++
+
+				if paramCount == entry.MaxParams || totalCount == len(entry.PotentialParameters) {
+					query.Add(util.RandSeq(6), entry.CanaryValue)
+
+					req := createRequest(rawUrl, method, strings.NewReader(query.Encode()))
+
+					parameterURLChannel <- Request{
+						url:     rawUrl,
+						Request: req,
+					}
+
+					paramCount = 0
+
+					query = url.Values{}
 				}
 			}
 		}
@@ -324,6 +376,44 @@ func checkMaxURLSize(sizeCheckReqChannel chan Request, readyToScanURLs chan stri
 	}
 }
 
+func checkMaxReqSize(sizeCheckReqChannel chan Request, readyToScanReqs chan string) {
+	defer close(readyToScanReqs)
+
+	for req := range sizeCheckReqChannel {
+		if entry, ok := loadResults(req.url); ok {
+			data, err := ioutil.ReadAll(req.Body)
+
+			if err != nil {
+				continue
+			}
+
+			bodyParsed, err := url.ParseQuery(string(data))
+
+			if err != nil {
+				continue
+			}
+
+			currentMaxParams := len(bodyParsed) - 50
+
+			if entry.MaxParams != 100 {
+				// already solved, move on.
+				continue
+			}
+
+			resp, err := client.Do(req.Request)
+
+			if err != nil || resp.StatusCode != http.StatusOK {
+				entry.MaxParams = currentMaxParams
+				readyToScanReqs <- req.url
+				addToResults(req.url, entry)
+				continue
+			}
+
+			addToResults(req.url, entry)
+		}
+	}
+}
+
 func createMaxURLSizeRequests(stableReqChannel chan string, sizeCheckReqChannel chan Request) {
 	defer close(sizeCheckReqChannel)
 
@@ -372,8 +462,43 @@ func createMaxURLSizeRequests(stableReqChannel chan string, sizeCheckReqChannel 
 	}
 }
 
-func createRequest(url string) *http.Request {
-	req, err := http.NewRequest("GET", url, nil)
+func createMaxBodySizeRequests(stableReqChannel chan string, sizeCheckReqChannel chan Request, method string) {
+	defer close(sizeCheckReqChannel)
+
+	for rawUrl := range stableReqChannel {
+		if entry, ok := loadResults(rawUrl); ok {
+			query := url.Values{}
+			// add canary back so we can check reflections later
+			query.Add(util.RandSeq(6), entry.CanaryValue)
+
+			// add 100 parameters to URL as a start
+			for i := 0; i < 100; i++ {
+				query.Set(util.RandSeq(7), util.RandSeq(7))
+			}
+
+			// add an additional 50 (15 times)
+			for i := 0; i < 15; i++ {
+				for i := 0; i < 50; i++ {
+					query.Set(util.RandSeq(10), util.RandSeq(10))
+				}
+
+				req, err := http.NewRequest(method, rawUrl, bytes.NewBufferString(query.Encode()))
+
+				if err != nil {
+					continue
+				}
+
+				sizeCheckReqChannel <- Request{
+					url:     rawUrl,
+					Request: req,
+				}
+			}
+		}
+	}
+}
+
+func createRequest(url string, method string, body io.Reader) *http.Request {
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil
 	}
@@ -432,7 +557,36 @@ func addURLsToStabilityRequestChannel(urls []string, reqChan chan Request) {
 			query.Set(util.RandSeq(6), canary)
 			originalTestUrl.RawQuery = query.Encode()
 
-			req := createRequest(originalTestUrl.String())
+			req := createRequest(originalTestUrl.String(), "GET", nil)
+
+			reqChan <- Request{req, rawUrl}
+		}
+	}
+}
+
+func addMethodURLsToStabilityRequestChannel(urls []string, reqChan chan Request, method string) {
+	defer close(reqChan)
+
+	for _, rawUrl := range urls {
+		canary := util.RandSeq(6)
+		addToResults(rawUrl, scan.URLInfo{
+			CanaryValue: canary,
+			CanaryCount: 0,
+			Stable:      true,
+			MaxParams:   100,
+		})
+
+		for i := 0; i < 5; i++ {
+			originalTestUrl, err := url.Parse(rawUrl)
+
+			if err != nil {
+				fmt.Printf("Error parsing URL: %s\n", err)
+			}
+
+			query := url.Values{}
+			query.Set(util.RandSeq(6), canary)
+
+			req := createRequest(originalTestUrl.String(), method, strings.NewReader(query.Encode()))
 
 			reqChan <- Request{req, rawUrl}
 		}

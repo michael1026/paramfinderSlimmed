@@ -41,6 +41,7 @@ type Body struct {
 type FoundParameters struct {
 	parameters []string
 	url        string
+	method     string
 }
 
 var results map[string]scan.URLInfo
@@ -124,25 +125,29 @@ func main() {
 	// send requests to get responses
 	go getParameterResponses(parameterURLChannel, parameterRespChannel)
 	// check responses for reflections
-	go findReflections(parameterRespChannel, foundParametersChannel)
+	go findReflections(parameterRespChannel, foundParametersChannel, *requestMethod)
 
-	writeJsonResults(foundParametersChannel, *outputFile, *requestMethod)
+	writeJsonResults(foundParametersChannel, *outputFile)
 
 	wg.Wait()
 
 }
 
-func writeJsonResults(foundParamsChan chan FoundParameters, outputFile string, method string) {
+func writeJsonResults(foundParamsChan chan FoundParameters, outputFile string) {
 	jsonResults := make(map[string]scan.JsonResult)
 
 	for paramResult := range foundParamsChan {
 		if entry, ok := jsonResults[paramResult.url]; ok {
-			param := scan.Param{Method: method, Names: paramResult.parameters}
-			entry.Params = append(entry.Params, param)
+			for i, entryParams := range entry.Params {
+				if paramResult.method == entryParams.Method {
+					entryParams.Names = append(entryParams.Names, paramResult.parameters...)
+				}
+				entry.Params[i] = entryParams
+			}
 
 			jsonResults[paramResult.url] = entry
 		} else {
-			param := scan.Param{Method: method, Names: paramResult.parameters}
+			param := scan.Param{Method: paramResult.method, Names: paramResult.parameters}
 			result := scan.JsonResult{
 				Params: []scan.Param{param},
 			}
@@ -164,7 +169,7 @@ func writeJsonResults(foundParamsChan chan FoundParameters, outputFile string, m
 	}
 }
 
-func findReflections(parameterResponses chan Body, foundParamsChan chan FoundParameters) {
+func findReflections(parameterResponses chan Body, foundParamsChan chan FoundParameters, method string) {
 	var wg sync.WaitGroup
 
 	for i := 0; i < 10; i++ {
@@ -184,6 +189,7 @@ func findReflections(parameterResponses chan Body, foundParamsChan chan FoundPar
 						foundParamsChan <- FoundParameters{
 							url:        resp.url,
 							parameters: foundParams,
+							method:     method,
 						}
 					}
 				}

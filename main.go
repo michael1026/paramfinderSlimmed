@@ -340,16 +340,7 @@ func checkURLStability(stabilityRespChannel chan Response, stableChannel chan st
 				continue
 			}
 
-			if entry.CanaryCount != reflectedscanner.CountReflections(body, entry.CanaryValue) {
-				fmt.Printf("%s is unstable. Skipping.\n", resp.url)
-				entry.Stable = false
-				addToResults(resp.url, entry)
-				continue
-			}
-
-			if entry.NumberOfCheckedURLs == 5 {
-				stableChannel <- resp.url
-			}
+			stableChannel <- resp.url
 
 			addToResults(resp.url, entry)
 		}
@@ -552,21 +543,19 @@ func addURLsToStabilityRequestChannel(urls []string, reqChan chan Request) {
 			MaxParams:   100,
 		})
 
-		for i := 0; i < 5; i++ {
-			originalTestUrl, err := url.Parse(rawUrl)
+		originalTestUrl, err := url.Parse(rawUrl)
 
-			if err != nil {
-				fmt.Printf("Error parsing URL: %s\n", err)
-			}
-
-			query := originalTestUrl.Query()
-			query.Set(util.RandSeq(6), canary)
-			originalTestUrl.RawQuery = query.Encode()
-
-			req := createRequest(originalTestUrl.String(), "GET", nil)
-
-			reqChan <- Request{req, rawUrl}
+		if err != nil {
+			fmt.Printf("Error parsing URL: %s\n", err)
 		}
+
+		query := originalTestUrl.Query()
+		query.Set(util.RandSeq(6), canary)
+		originalTestUrl.RawQuery = query.Encode()
+
+		req := createRequest(originalTestUrl.String(), "GET", nil)
+
+		reqChan <- Request{req, rawUrl}
 	}
 }
 
@@ -582,20 +571,18 @@ func addMethodURLsToStabilityRequestChannel(urls []string, reqChan chan Request,
 			MaxParams:   100,
 		})
 
-		for i := 0; i < 5; i++ {
-			originalTestUrl, err := url.Parse(rawUrl)
+		originalTestUrl, err := url.Parse(rawUrl)
 
-			if err != nil {
-				fmt.Printf("Error parsing URL: %s\n", err)
-			}
-
-			query := url.Values{}
-			query.Set(util.RandSeq(6), canary)
-
-			req := createRequest(originalTestUrl.String(), method, strings.NewReader(query.Encode()))
-
-			reqChan <- Request{req, rawUrl}
+		if err != nil {
+			fmt.Printf("Error parsing URL: %s\n", err)
 		}
+
+		query := url.Values{}
+		query.Set(util.RandSeq(6), canary)
+
+		req := createRequest(originalTestUrl.String(), method, strings.NewReader(query.Encode()))
+
+		reqChan <- Request{req, rawUrl}
 	}
 }
 

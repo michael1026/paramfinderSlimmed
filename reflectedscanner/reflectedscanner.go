@@ -18,18 +18,20 @@ func CheckStability(canary *string, body string, urlInfo *scan.URLInfo) {
 func CheckDocForReflections(body string, urlInfo *scan.URLInfo) []string {
 	var foundParameters []string
 
-	if CountReflections(body, urlInfo.CanaryValue) != urlInfo.CanaryCount {
-		// something happened with the response to cause the canary count to not be correct
-		// this is probably caused by a parameter included in the request
-		// for now, we are going to ignore this URL, but in the future, I'd like to find the parameter that caused this
+	// if CountReflections(body, urlInfo.CanaryValue) != urlInfo.CanaryCount {
+	// 	// something happened with the response to cause the canary count to not be correct
+	// 	// this is probably caused by a parameter included in the request
+	// 	// for now, we are going to ignore this URL, but in the future, I'd like to find the parameter that caused this
 
-		return foundParameters
-	}
+	// 	return foundParameters
+	// }
+
+	canaryCount := CountReflections(body, urlInfo.CanaryValue)
 
 	for param, value := range urlInfo.PotentialParameters {
 		counted := CountReflections(body, value)
 
-		if counted > urlInfo.CanaryCount {
+		if counted > canaryCount {
 			foundParameters = util.AppendIfMissing(foundParameters, param)
 		}
 	}

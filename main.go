@@ -256,9 +256,9 @@ func createParameterURLs(readyToScanChannel chan string, parameterURLChannel cha
 				totalCount++
 
 				if paramCount == entry.MaxParams || totalCount == len(entry.PotentialParameters) {
-					query.Add(util.RandSeq(6), entry.CanaryValue)
-
-					parsedUrl.RawQuery = query.Encode()
+					encodedQuery := query.Encode()
+					encodedQuery = fmt.Sprintf("%s=%s&%s", util.RandSeq(6), entry.CanaryValue, encodedQuery)
+					parsedUrl.RawQuery = encodedQuery
 
 					parameterURLChannel <- Request{
 						url:     rawUrl,
@@ -297,9 +297,9 @@ func createParameterReqs(readyToScanChannel chan string, parameterURLChannel cha
 				totalCount++
 
 				if paramCount == entry.MaxParams || totalCount == len(entry.PotentialParameters) {
-					query.Add(util.RandSeq(6), entry.CanaryValue)
-
-					req := createRequest(rawUrl, method, strings.NewReader(query.Encode()))
+					encodedQuery := query.Encode()
+					encodedQuery = fmt.Sprintf("%s=%s&%s", util.RandSeq(6), entry.CanaryValue, encodedQuery)
+					req := createRequest(rawUrl, method, strings.NewReader(encodedQuery))
 
 					parameterURLChannel <- Request{
 						url:     rawUrl,
@@ -320,25 +320,7 @@ func checkURLStability(stabilityRespChannel chan Response, stableChannel chan st
 
 	for resp := range stabilityRespChannel {
 		if entry, ok := loadResults(resp.url); ok {
-			body, err := resp.doc.Html()
-
-			if err != nil {
-				fmt.Printf("%s is unstable. Skipping.\n", resp.url)
-				entry.Stable = false
-				addToResults(resp.url, entry)
-				continue
-			}
-
-			if entry.NumberOfCheckedURLs == 0 {
-				entry.PotentialParameters = findPotentialParameters(resp.doc)
-				entry.CanaryCount = reflectedscanner.CountReflections(body, entry.CanaryValue)
-			}
-
-			entry.NumberOfCheckedURLs++
-
-			if entry.Stable == false {
-				continue
-			}
+			entry.PotentialParameters = findPotentialParameters(resp.doc)
 
 			stableChannel <- resp.url
 
@@ -415,45 +397,41 @@ func createMaxURLSizeRequests(stableReqChannel chan string, sizeCheckReqChannel 
 	defer close(sizeCheckReqChannel)
 
 	for rawUrl := range stableReqChannel {
-		if entry, ok := loadResults(rawUrl); ok {
-			parsedUrl, err := url.Parse(rawUrl)
+		parsedUrl, err := url.Parse(rawUrl)
+
+		if err != nil {
+			fmt.Printf("Error parsing URL: %s\n", err)
+			continue
+		}
+
+		if err != nil {
+			fmt.Printf("Error creating request")
+			continue
+		}
+
+		query := parsedUrl.Query()
+
+		// add 100 parameters to URL as a start
+		for i := 0; i < 100; i++ {
+			query.Set(util.RandSeq(7), util.RandSeq(7))
+		}
+
+		// add an additional 50 (15 times)
+		for i := 0; i < 15; i++ {
+			for i := 0; i < 50; i++ {
+				query.Set(util.RandSeq(10), util.RandSeq(10))
+			}
+
+			parsedUrl.RawQuery = query.Encode()
+			req, err := http.NewRequest("HEAD", parsedUrl.String(), nil)
 
 			if err != nil {
-				fmt.Printf("Error parsing URL: %s\n", err)
 				continue
 			}
 
-			if err != nil {
-				fmt.Printf("Error creating request")
-				continue
-			}
-
-			query := parsedUrl.Query()
-			// add canary back so we can check reflections later
-			query.Add(util.RandSeq(6), entry.CanaryValue)
-
-			// add 100 parameters to URL as a start
-			for i := 0; i < 100; i++ {
-				query.Set(util.RandSeq(7), util.RandSeq(7))
-			}
-
-			// add an additional 50 (15 times)
-			for i := 0; i < 15; i++ {
-				for i := 0; i < 50; i++ {
-					query.Set(util.RandSeq(10), util.RandSeq(10))
-				}
-
-				parsedUrl.RawQuery = query.Encode()
-				req, err := http.NewRequest("HEAD", parsedUrl.String(), nil)
-
-				if err != nil {
-					continue
-				}
-
-				sizeCheckReqChannel <- Request{
-					url:     rawUrl,
-					Request: req,
-				}
+			sizeCheckReqChannel <- Request{
+				url:     rawUrl,
+				Request: req,
 			}
 		}
 	}
@@ -463,32 +441,28 @@ func createMaxBodySizeRequests(stableReqChannel chan string, sizeCheckReqChannel
 	defer close(sizeCheckReqChannel)
 
 	for rawUrl := range stableReqChannel {
-		if entry, ok := loadResults(rawUrl); ok {
-			query := url.Values{}
-			// add canary back so we can check reflections later
-			query.Add(util.RandSeq(6), entry.CanaryValue)
+		query := url.Values{}
 
-			// add 100 parameters to URL as a start
-			for i := 0; i < 100; i++ {
-				query.Set(util.RandSeq(7), util.RandSeq(7))
+		// add 100 parameters to URL as a start
+		for i := 0; i < 100; i++ {
+			query.Set(util.RandSeq(7), util.RandSeq(7))
+		}
+
+		// add an additional 50 (15 times)
+		for i := 0; i < 15; i++ {
+			for i := 0; i < 50; i++ {
+				query.Set(util.RandSeq(10), util.RandSeq(10))
 			}
 
-			// add an additional 50 (15 times)
-			for i := 0; i < 15; i++ {
-				for i := 0; i < 50; i++ {
-					query.Set(util.RandSeq(10), util.RandSeq(10))
-				}
+			req, err := http.NewRequest(method, rawUrl, bytes.NewBufferString(query.Encode()))
 
-				req, err := http.NewRequest(method, rawUrl, bytes.NewBufferString(query.Encode()))
+			if err != nil {
+				continue
+			}
 
-				if err != nil {
-					continue
-				}
-
-				sizeCheckReqChannel <- Request{
-					url:     rawUrl,
-					Request: req,
-				}
+			sizeCheckReqChannel <- Request{
+				url:     rawUrl,
+				Request: req,
 			}
 		}
 	}
@@ -550,7 +524,6 @@ func addURLsToStabilityRequestChannel(urls []string, reqChan chan Request) {
 		}
 
 		query := originalTestUrl.Query()
-		query.Set(util.RandSeq(6), canary)
 		originalTestUrl.RawQuery = query.Encode()
 
 		req := createRequest(originalTestUrl.String(), "GET", nil)
@@ -578,8 +551,6 @@ func addMethodURLsToStabilityRequestChannel(urls []string, reqChan chan Request,
 		}
 
 		query := url.Values{}
-		query.Set(util.RandSeq(6), canary)
-
 		req := createRequest(originalTestUrl.String(), method, strings.NewReader(query.Encode()))
 
 		reqChan <- Request{req, rawUrl}

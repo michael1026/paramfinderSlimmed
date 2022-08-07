@@ -44,6 +44,7 @@ type FoundParameters struct {
 	method     string
 }
 
+var START_MAX_PARAMS = 25
 var results map[string]scan.URLInfo
 var resultsMutex *sync.RWMutex
 var wordlist []string
@@ -334,16 +335,16 @@ func checkMaxURLSize(sizeCheckReqChannel chan Request, readyToScanURLs chan stri
 
 	for req := range sizeCheckReqChannel {
 		if entry, ok := loadResults(req.url); ok {
-			currentMaxParams := len(req.Request.URL.Query()) - 50
+			currentMaxParams := len(req.Request.URL.Query()) - START_MAX_PARAMS
 
-			if entry.MaxParams != 100 {
+			if entry.MaxParams != START_MAX_PARAMS {
 				// already solved, move on.
 				continue
 			}
 
 			resp, err := client.Do(req.Request)
 
-			if err != nil || resp.StatusCode != http.StatusOK {
+			if err != nil || resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != entry.ContentType {
 				entry.MaxParams = currentMaxParams
 				readyToScanURLs <- req.url
 				addToResults(req.url, entry)
@@ -372,9 +373,9 @@ func checkMaxReqSize(sizeCheckReqChannel chan Request, readyToScanReqs chan stri
 				continue
 			}
 
-			currentMaxParams := len(bodyParsed) - 50
+			currentMaxParams := len(bodyParsed) - START_MAX_PARAMS
 
-			if entry.MaxParams != 100 {
+			if entry.MaxParams != START_MAX_PARAMS {
 				// already solved, move on.
 				continue
 			}
@@ -411,14 +412,14 @@ func createMaxURLSizeRequests(stableReqChannel chan string, sizeCheckReqChannel 
 
 		query := parsedUrl.Query()
 
-		// add 100 parameters to URL as a start
-		for i := 0; i < 100; i++ {
+		// add 25 parameters to URL as a start
+		for i := 0; i < START_MAX_PARAMS; i++ {
 			query.Set(util.RandSeq(7), util.RandSeq(7))
 		}
 
-		// add an additional 50 (15 times)
+		// add an additional 25 (15 times)
 		for i := 0; i < 15; i++ {
-			for i := 0; i < 50; i++ {
+			for i := 0; i < START_MAX_PARAMS; i++ {
 				query.Set(util.RandSeq(10), util.RandSeq(10))
 			}
 
@@ -443,14 +444,14 @@ func createMaxBodySizeRequests(stableReqChannel chan string, sizeCheckReqChannel
 	for rawUrl := range stableReqChannel {
 		query := url.Values{}
 
-		// add 100 parameters to URL as a start
-		for i := 0; i < 100; i++ {
+		// add 25 parameters to URL as a start
+		for i := 0; i < START_MAX_PARAMS; i++ {
 			query.Set(util.RandSeq(7), util.RandSeq(7))
 		}
 
-		// add an additional 50 (15 times)
+		// add an additional 25 (15 times)
 		for i := 0; i < 15; i++ {
-			for i := 0; i < 50; i++ {
+			for i := 0; i < START_MAX_PARAMS; i++ {
 				query.Set(util.RandSeq(10), util.RandSeq(10))
 			}
 
@@ -514,7 +515,7 @@ func addURLsToStabilityRequestChannel(urls []string, reqChan chan Request) {
 			CanaryValue: canary,
 			CanaryCount: 0,
 			Stable:      true,
-			MaxParams:   100,
+			MaxParams:   START_MAX_PARAMS,
 		})
 
 		originalTestUrl, err := url.Parse(rawUrl)
@@ -541,7 +542,7 @@ func addMethodURLsToStabilityRequestChannel(urls []string, reqChan chan Request,
 			CanaryValue: canary,
 			CanaryCount: 0,
 			Stable:      true,
-			MaxParams:   100,
+			MaxParams:   START_MAX_PARAMS,
 		})
 
 		originalTestUrl, err := url.Parse(rawUrl)
@@ -583,6 +584,10 @@ func getStabilityResponses(requests chan Request, responses chan Response) {
 
 					defer resp.Body.Close()
 
+					if entry.ContentType == "" {
+						entry.ContentType = resp.Header.Get("Content-Type")
+					}
+
 					doc, err := goquery.NewDocumentFromResponse(resp)
 
 					if err == nil && doc != nil {
@@ -591,6 +596,8 @@ func getStabilityResponses(requests chan Request, responses chan Response) {
 							doc: doc,
 						}
 					}
+
+					addToResults(req.url, entry)
 				}
 			}
 		}()

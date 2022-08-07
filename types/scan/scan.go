@@ -3,6 +3,7 @@ package scan
 type URLInfo struct {
 	Stable              bool
 	CanaryCount         int
+	ContentType         string
 	FoundParameters     []string
 	PotentialParameters map[string]string
 	MaxParams           int

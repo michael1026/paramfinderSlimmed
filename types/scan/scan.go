@@ -19,6 +19,14 @@ type Scan struct {
 	JsonResults JsonResults
 }
 
+func New() *Scan {
+	s := Scan{
+		ScanResults: make(ScanResults),
+		JsonResults: make(JsonResults),
+	}
+	return &s
+}
+
 type JsonResult struct {
 	Params []Param `json:"params"`
 }
@@ -29,8 +37,3 @@ type Param struct {
 }
 
 type JsonResults map[string]JsonResult
-
-func (s *Scan) FillDefaults() {
-	s.ScanResults = make(ScanResults)
-	s.JsonResults = make(JsonResults)
-}

@@ -61,8 +61,7 @@ var client *http.Client
 /***************************************/
 
 func main() {
-	scanInfo := scan.Scan{}
-	scanInfo.FillDefaults()
+	scanInfo := scan.New()
 	results = make(map[string]scan.URLInfo)
 	resultsMutex = &sync.RWMutex{}
 

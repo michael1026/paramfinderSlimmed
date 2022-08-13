@@ -7,14 +7,6 @@ import (
 	"github.com/michael1026/paramfinderSlimmed/util"
 )
 
-func CheckStability(canary *string, body string, urlInfo *scan.URLInfo) {
-	canaryCount := CountReflections(body, *canary)
-
-	if urlInfo.CanaryCount != canaryCount {
-		urlInfo.Stable = false
-	}
-}
-
 func CheckDocForReflections(body string, urlInfo *scan.URLInfo) []string {
 	var foundParameters []string
 	canaryCount := CountReflections(body, urlInfo.CanaryValue)

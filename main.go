@@ -44,6 +44,13 @@ type FoundParameters struct {
 	method     string
 }
 
+var regexs = []*regexp.Regexp{
+	regexp.MustCompile("\"[a-zA-Z_\\-]{1,20}\":"),
+	regexp.MustCompile("'[a-zA-Z_\\-]{1,20}':"),
+	regexp.MustCompile("[a-zA-Z_\\-]{1,20}:({|\"|\\s)"),
+	regexp.MustCompile("[a-zA-Z_\\-]{1,20} = (\"|')"),
+}
+
 var START_MAX_PARAMS = 25
 var results map[string]scan.URLInfo
 var resultsMutex *sync.RWMutex
@@ -644,14 +651,7 @@ func keywordsFromRegex(doc *goquery.Document) []string {
 		fmt.Printf("Error reading doc: %s\n", err)
 	}
 
-	regexs := [...]string{
-		"\"[a-zA-Z_\\-]{1,20}\":",
-		"'[a-zA-Z_\\-]{1,20}':",
-		"[a-zA-Z_\\-]{1,20}:({|\"|\\s)",
-		"[a-zA-Z_\\-]{1,20} = (\"|')"}
-
-	for _, regex := range regexs {
-		re := regexp.MustCompile(regex)
+	for _, re := range regexs {
 		allMatches := re.FindAllStringSubmatch(html, -1)
 
 		for _, matches := range allMatches {

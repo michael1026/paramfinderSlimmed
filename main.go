@@ -19,6 +19,7 @@ import (
 	"github.com/michael1026/paramfinderSlimmed/scanhttp"
 	"github.com/michael1026/paramfinderSlimmed/types/scan"
 	"github.com/michael1026/paramfinderSlimmed/util"
+	"golang.org/x/exp/maps"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -491,12 +492,12 @@ func readLines(path string) ([]string, error) {
 	}
 	defer file.Close()
 
-	var lines []string
+	lines := make(map[string]struct{})
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		lines = util.AppendIfMissing(lines, scanner.Text())
+		lines[scanner.Text()] = struct{}{}
 	}
-	return lines, scanner.Err()
+	return maps.Keys(lines), scanner.Err()
 }
 
 func readWordlistIntoFile(wordlistPath string) ([]string, error) {
@@ -640,7 +641,7 @@ func findPotentialParameters(doc *goquery.Document) map[string]string {
 
 func keywordsFromRegex(doc *goquery.Document) []string {
 	html, err := doc.Html()
-	var newWordlist []string = wordlist
+	newWordlist := make(map[string]struct{})
 
 	if err != nil {
 		fmt.Printf("Error reading doc: %s\n", err)
@@ -657,13 +658,13 @@ func keywordsFromRegex(doc *goquery.Document) []string {
 				match = strings.ReplaceAll(match, " ", "")
 
 				if match != "" {
-					newWordlist = util.AppendIfMissing(newWordlist, match)
+					newWordlist[match] = struct{}{}
 				}
 			}
 		}
 	}
 
-	return newWordlist
+	return maps.Keys(newWordlist)
 }
 
 func addToResults(key string, info scan.URLInfo) {

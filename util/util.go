@@ -9,7 +9,7 @@ import (
 	"net/http"
 )
 
-var letters = []rune("abcdefghijklmnopqrstuvwxyz")
+const letters = "abcdefghijklmnopqrstuvwxyz"
 
 func AppendIfMissing(slice []string, s string) []string {
 	for _, ele := range slice {
@@ -21,7 +21,7 @@ func AppendIfMissing(slice []string, s string) []string {
 }
 
 func RandSeq(n int) string {
-	b := make([]rune, n)
+	b := make([]byte, n)
 	for i := range b {
 		b[i] = letters[rand.Intn(len(letters))]
 	}

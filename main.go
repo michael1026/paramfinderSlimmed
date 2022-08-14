@@ -411,11 +411,6 @@ func createMaxURLSizeRequests(stableReqChannel chan string, sizeCheckReqChannel 
 			continue
 		}
 
-		if err != nil {
-			fmt.Printf("Error creating request")
-			continue
-		}
-
 		query := parsedUrl.Query()
 
 		// add 25 parameters to URL as a start

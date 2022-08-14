@@ -36,29 +36,6 @@ func JSONMarshal(t interface{}) ([]byte, error) {
 	return buffer.Bytes(), err
 }
 
-func SplitMap(m map[string]string) (odds map[string]string, evens map[string]string) {
-	n := 1
-	odds = make(map[string]string)
-	evens = make(map[string]string)
-	for key, value := range m {
-		if n%2 == 0 {
-			evens[key] = value
-		} else {
-			odds[key] = value
-		}
-		n++
-	}
-	return odds, evens
-}
-
-func DeleteByKey(m *map[string]string, val string) {
-	for k, v := range *m {
-		if v == val {
-			delete(*m, k)
-		}
-	}
-}
-
 func ResponseToBodyString(resp *http.Response) (body string) {
 	bodyString := ""
 

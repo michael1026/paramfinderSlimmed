@@ -55,7 +55,7 @@ var regexs = []*regexp.Regexp{
 var START_MAX_PARAMS = 25
 var results map[string]scan.URLInfo
 var resultsMutex *sync.RWMutex
-var wordlist []string
+var wordlist map[string]struct{}
 var client *http.Client
 
 /***************************************
@@ -485,7 +485,7 @@ func createRequest(url string, method string, body io.Reader) *http.Request {
 	return req
 }
 
-func readLines(path string) ([]string, error) {
+func readLines(path string) (map[string]struct{}, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -497,10 +497,10 @@ func readLines(path string) ([]string, error) {
 	for scanner.Scan() {
 		lines[scanner.Text()] = struct{}{}
 	}
-	return maps.Keys(lines), scanner.Err()
+	return lines, scanner.Err()
 }
 
-func readWordlistIntoFile(wordlistPath string) ([]string, error) {
+func readWordlistIntoFile(wordlistPath string) (map[string]struct{}, error) {
 	lines, err := readLines(wordlistPath)
 	if err != nil {
 		log.Fatalf("readLines: %s", err)
@@ -641,7 +641,7 @@ func findPotentialParameters(doc *goquery.Document) map[string]string {
 
 func keywordsFromRegex(doc *goquery.Document) []string {
 	html, err := doc.Html()
-	newWordlist := make(map[string]struct{})
+	newWordlist := wordlist
 
 	if err != nil {
 		fmt.Printf("Error reading doc: %s\n", err)

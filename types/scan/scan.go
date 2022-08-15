@@ -15,7 +15,7 @@ type ScanResults map[string]*URLInfo
 
 type Scan struct {
 	ScanResults ScanResults
-	WordList    []string
+	WordList    map[string]struct{}
 	JsonResults JsonResults
 }
 

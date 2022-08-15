@@ -9,19 +9,10 @@ import (
 	"net/http"
 )
 
-var letters = []rune("abcdefghijklmnopqrstuvwxyz")
-
-func AppendIfMissing(slice []string, s string) []string {
-	for _, ele := range slice {
-		if ele == s {
-			return slice
-		}
-	}
-	return append(slice, s)
-}
+const letters = "abcdefghijklmnopqrstuvwxyz"
 
 func RandSeq(n int) string {
-	b := make([]rune, n)
+	b := make([]byte, n)
 	for i := range b {
 		b[i] = letters[rand.Intn(len(letters))]
 	}
@@ -34,29 +25,6 @@ func JSONMarshal(t interface{}) ([]byte, error) {
 	encoder.SetEscapeHTML(false)
 	err := encoder.Encode(t)
 	return buffer.Bytes(), err
-}
-
-func SplitMap(m map[string]string) (odds map[string]string, evens map[string]string) {
-	n := 1
-	odds = make(map[string]string)
-	evens = make(map[string]string)
-	for key, value := range m {
-		if n%2 == 0 {
-			evens[key] = value
-		} else {
-			odds[key] = value
-		}
-		n++
-	}
-	return odds, evens
-}
-
-func DeleteByKey(m *map[string]string, val string) {
-	for k, v := range *m {
-		if v == val {
-			delete(*m, k)
-		}
-	}
 }
 
 func ResponseToBodyString(resp *http.Response) (body string) {

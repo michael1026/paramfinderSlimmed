@@ -19,6 +19,7 @@ import (
 	"github.com/michael1026/paramfinderSlimmed/scanhttp"
 	"github.com/michael1026/paramfinderSlimmed/types/scan"
 	"github.com/michael1026/paramfinderSlimmed/util"
+	"golang.org/x/exp/maps"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -44,10 +45,17 @@ type FoundParameters struct {
 	method     string
 }
 
+var regexs = []*regexp.Regexp{
+	regexp.MustCompile("\"[a-zA-Z_\\-]{1,20}\":"),
+	regexp.MustCompile("'[a-zA-Z_\\-]{1,20}':"),
+	regexp.MustCompile("[a-zA-Z_\\-]{1,20}:({|\"|\\s)"),
+	regexp.MustCompile("[a-zA-Z_\\-]{1,20} = (\"|')"),
+}
+
 var START_MAX_PARAMS = 25
 var results map[string]scan.URLInfo
 var resultsMutex *sync.RWMutex
-var wordlist []string
+var wordlist map[string]struct{}
 var client *http.Client
 
 /***************************************
@@ -61,8 +69,7 @@ var client *http.Client
 /***************************************/
 
 func main() {
-	scanInfo := scan.Scan{}
-	scanInfo.FillDefaults()
+	scanInfo := scan.New()
 	results = make(map[string]scan.URLInfo)
 	resultsMutex = &sync.RWMutex{}
 
@@ -405,11 +412,6 @@ func createMaxURLSizeRequests(stableReqChannel chan string, sizeCheckReqChannel 
 			continue
 		}
 
-		if err != nil {
-			fmt.Printf("Error creating request")
-			continue
-		}
-
 		query := parsedUrl.Query()
 
 		// add 25 parameters to URL as a start
@@ -483,22 +485,22 @@ func createRequest(url string, method string, body io.Reader) *http.Request {
 	return req
 }
 
-func readLines(path string) ([]string, error) {
+func readLines(path string) (map[string]struct{}, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	var lines []string
+	lines := make(map[string]struct{})
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		lines = util.AppendIfMissing(lines, scanner.Text())
+		lines[scanner.Text()] = struct{}{}
 	}
 	return lines, scanner.Err()
 }
 
-func readWordlistIntoFile(wordlistPath string) ([]string, error) {
+func readWordlistIntoFile(wordlistPath string) (map[string]struct{}, error) {
 	lines, err := readLines(wordlistPath)
 	if err != nil {
 		log.Fatalf("readLines: %s", err)
@@ -639,20 +641,13 @@ func findPotentialParameters(doc *goquery.Document) map[string]string {
 
 func keywordsFromRegex(doc *goquery.Document) []string {
 	html, err := doc.Html()
-	var newWordlist []string = wordlist
+	newWordlist := wordlist
 
 	if err != nil {
 		fmt.Printf("Error reading doc: %s\n", err)
 	}
 
-	regexs := [...]string{
-		"\"[a-zA-Z_\\-]{1,20}\":",
-		"'[a-zA-Z_\\-]{1,20}':",
-		"[a-zA-Z_\\-]{1,20}:({|\"|\\s)",
-		"[a-zA-Z_\\-]{1,20} = (\"|')"}
-
-	for _, regex := range regexs {
-		re := regexp.MustCompile(regex)
+	for _, re := range regexs {
 		allMatches := re.FindAllStringSubmatch(html, -1)
 
 		for _, matches := range allMatches {
@@ -663,13 +658,13 @@ func keywordsFromRegex(doc *goquery.Document) []string {
 				match = strings.ReplaceAll(match, " ", "")
 
 				if match != "" {
-					newWordlist = util.AppendIfMissing(newWordlist, match)
+					newWordlist[match] = struct{}{}
 				}
 			}
 		}
 	}
 
-	return newWordlist
+	return maps.Keys(newWordlist)
 }
 
 func addToResults(key string, info scan.URLInfo) {

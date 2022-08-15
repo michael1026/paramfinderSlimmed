@@ -4,26 +4,18 @@ import (
 	"strings"
 
 	"github.com/michael1026/paramfinderSlimmed/types/scan"
-	"github.com/michael1026/paramfinderSlimmed/util"
+	"golang.org/x/exp/maps"
 )
 
-func CheckStability(canary *string, body string, urlInfo *scan.URLInfo) {
-	canaryCount := CountReflections(body, *canary)
-
-	if urlInfo.CanaryCount != canaryCount {
-		urlInfo.Stable = false
-	}
-}
-
 func CheckDocForReflections(body string, urlInfo *scan.URLInfo) []string {
-	var foundParameters []string
+	foundParameters := make(map[string]struct{})
 	canaryCount := CountReflections(body, urlInfo.CanaryValue)
 
 	for param, value := range urlInfo.PotentialParameters {
 		counted := CountReflections(body, value)
 
 		if counted > canaryCount {
-			foundParameters = util.AppendIfMissing(foundParameters, param)
+			foundParameters[param] = struct{}{}
 			if len(foundParameters) > 50 {
 				// Going to assume these are false positives. 50+ parameters should not exist on one URL
 				return []string{}
@@ -31,7 +23,7 @@ func CheckDocForReflections(body string, urlInfo *scan.URLInfo) []string {
 		}
 	}
 
-	return foundParameters
+	return maps.Keys(foundParameters)
 }
 
 func CountReflections(body string, canary string) int {

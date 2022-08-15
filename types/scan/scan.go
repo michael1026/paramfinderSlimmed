@@ -15,8 +15,16 @@ type ScanResults map[string]*URLInfo
 
 type Scan struct {
 	ScanResults ScanResults
-	WordList    []string
+	WordList    map[string]struct{}
 	JsonResults JsonResults
+}
+
+func New() *Scan {
+	s := Scan{
+		ScanResults: make(ScanResults),
+		JsonResults: make(JsonResults),
+	}
+	return &s
 }
 
 type JsonResult struct {
@@ -29,8 +37,3 @@ type Param struct {
 }
 
 type JsonResults map[string]JsonResult
-
-func (s *Scan) FillDefaults() {
-	s.ScanResults = make(ScanResults)
-	s.JsonResults = make(JsonResults)
-}

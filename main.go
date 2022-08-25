@@ -17,6 +17,7 @@ import (
 
 	"github.com/michael1026/paramfinderSlimmed/reflectedscanner"
 	"github.com/michael1026/paramfinderSlimmed/scanhttp"
+	"github.com/michael1026/paramfinderSlimmed/types/args"
 	"github.com/michael1026/paramfinderSlimmed/types/scan"
 	"github.com/michael1026/paramfinderSlimmed/util"
 	"golang.org/x/exp/maps"
@@ -57,6 +58,7 @@ var results map[string]scan.URLInfo
 var resultsMutex *sync.RWMutex
 var wordlist map[string]struct{}
 var client *http.Client
+var headers args.HeaderArgs
 
 /***************************************
 * Ideas....
@@ -76,6 +78,7 @@ func main() {
 	outputFile := flag.String("o", "", "File to output results to (.json)")
 	wordlistFile := flag.String("w", "", "Wordlist file")
 	requestMethod := flag.String("X", "GET", "Request method (default GET)")
+	flag.Var(&headers, "H", "Headers to add")
 	// threads := flag.Int("t", 5, "Number of threads")
 
 	flag.Parse()
@@ -228,11 +231,9 @@ func getParameterResponses(parameterURLs chan Request, parameterResponses chan B
 
 				bodyString := util.ResponseToBodyString(resp)
 
-				if resp.StatusCode == http.StatusOK {
-					parameterResponses <- Body{
-						body: bodyString,
-						url:  req.url,
-					}
+				parameterResponses <- Body{
+					body: bodyString,
+					url:  req.url,
 				}
 			}
 		}()
@@ -481,6 +482,14 @@ func createRequest(url string, method string, body io.Reader) *http.Request {
 	req.Header.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/81.0")
 	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
+	for _, h := range headers {
+		parts := strings.SplitN(h, ":", 2)
+
+		if len(parts) != 2 {
+			continue
+		}
+		req.Header.Set(parts[0], parts[1])
+	}
 
 	return req
 }

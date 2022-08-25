@@ -30,14 +30,18 @@ func JSONMarshal(t interface{}) ([]byte, error) {
 func ResponseToBodyString(resp *http.Response) (body string) {
 	bodyString := ""
 
-	if resp.StatusCode == http.StatusOK {
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			fmt.Printf("Error getting string %s\n", err)
-			return bodyString
+	for name, values := range resp.Header {
+		for _, value := range values {
+			bodyString += fmt.Sprintf("%s: %s", name, value)
 		}
-		bodyString = string(bodyBytes)
 	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("Error getting string %s\n", err)
+		return bodyString
+	}
+	bodyString = string(bodyBytes)
 
 	return bodyString
 }

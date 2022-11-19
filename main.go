@@ -533,6 +533,7 @@ func addURLsToStabilityRequestChannel(urls []string, reqChan chan Request) {
 
 		if err != nil {
 			fmt.Printf("Error parsing URL: %s\n", err)
+			continue
 		}
 
 		query := originalTestUrl.Query()
@@ -560,6 +561,7 @@ func addMethodURLsToStabilityRequestChannel(urls []string, reqChan chan Request,
 
 		if err != nil {
 			fmt.Printf("Error parsing URL: %s\n", err)
+			continue
 		}
 
 		query := url.Values{}

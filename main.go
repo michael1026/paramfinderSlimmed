@@ -141,7 +141,6 @@ func main() {
 	writeJsonResults(foundParametersChannel, *outputFile)
 
 	wg.Wait()
-
 }
 
 func writeJsonResults(foundParamsChan chan FoundParameters, outputFile string) {

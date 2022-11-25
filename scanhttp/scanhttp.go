@@ -19,10 +19,15 @@ func BuildHttpClient() (c *http.Client) {
 	}
 
 	transport := &http.Transport{
-		MaxIdleConns:      100,
-		IdleConnTimeout:   time.Second * 10,
-		TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
-		DisableKeepAlives: true,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		MaxConnsPerHost:     100,
+		IdleConnTimeout:     time.Second * 10,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+			Renegotiation:      tls.RenegotiateOnceAsClient,
+		},
+		DisableKeepAlives: false,
 		DialContext:       dialer.Dial,
 	}
 
@@ -33,7 +38,7 @@ func BuildHttpClient() (c *http.Client) {
 	client := &http.Client{
 		Transport:     transport,
 		CheckRedirect: re,
-		Timeout:       time.Second * 10,
+		Timeout:       time.Second * 5,
 	}
 
 	return client
